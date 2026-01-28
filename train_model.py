@@ -44,8 +44,16 @@ def train_and_save():
     df_train = prepare_cyclical_features(df_train)
     df_test = prepare_cyclical_features(df_test)
     
+    # Add day of week (0=Monday, 6=Sunday)
+    df_train['day_of_week'] = df_train['Time_Bin'].dt.dayofweek
+    df_test['day_of_week'] = df_test['Time_Bin'].dt.dayofweek
+    
+    # Add weekend flag (Fridays surge more!)
+    df_train['is_weekend'] = (df_train['day_of_week'] >= 5).astype(int)
+    df_test['is_weekend'] = (df_test['day_of_week'] >= 5).astype(int)
+    
     # 4. Prepare final features
-    all_features = FEATURES + ['temp', 'precip', 'hour_sin', 'hour_cos']
+    all_features = FEATURES + ['temp', 'precip', 'hour_sin', 'hour_cos', 'day_of_week', 'is_weekend']
     df_train = df_train.dropna(subset=all_features + [TARGET])
     df_test = df_test.dropna(subset=all_features + [TARGET])
     

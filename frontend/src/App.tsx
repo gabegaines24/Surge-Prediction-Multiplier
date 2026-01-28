@@ -10,6 +10,7 @@ interface PredictionInput {
   temp: number
   precip: number
   hour: number
+  dayOfWeek: number  // 0=Monday, 6=Sunday
 }
 
 interface PredictionResult {
@@ -27,7 +28,8 @@ function App() {
     lagDemandVelocity15: 3,
     temp: 15,
     precip: 0,
-    hour: 12
+    hour: 12,
+    dayOfWeek: 4  // Friday (more surge!)
   })
   
   const [result, setResult] = useState<PredictionResult | null>(null)
@@ -101,7 +103,8 @@ function App() {
         lagDemandVelocity15: 12,
         temp: 10,
         precip: 0,
-        hour: 8
+        hour: 8,
+        dayOfWeek: 1  // Tuesday morning commute
       },
       evening: {
         supplyElasticity: 0.4,
@@ -111,7 +114,8 @@ function App() {
         lagDemandVelocity15: 20,
         temp: 18,
         precip: 0,
-        hour: 18
+        hour: 18,
+        dayOfWeek: 4  // Friday evening rush (highest surge!)
       },
       rainy: {
         supplyElasticity: 0.3,
@@ -121,7 +125,8 @@ function App() {
         lagDemandVelocity15: 28,
         temp: 12,
         precip: 5.2,
-        hour: 17
+        hour: 17,
+        dayOfWeek: 5  // Saturday night + rain = extreme surge
       }
     }
     setInput(samples[scenario])
@@ -246,6 +251,31 @@ function App() {
                     onChange={(e) => handleInputChange('hour', e.target.value)}
                   />
                   <span className="hint">0-23 (military time)</span>
+                </div>
+
+                <div className="input-group">
+                  <label>Day of Week</label>
+                  <select
+                    value={input.dayOfWeek}
+                    onChange={(e) => handleInputChange('dayOfWeek', e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '0.75rem',
+                      border: '2px solid #e2e8f0',
+                      borderRadius: '8px',
+                      fontSize: '1rem',
+                      backgroundColor: 'white'
+                    }}
+                  >
+                    <option value="0">Monday</option>
+                    <option value="1">Tuesday</option>
+                    <option value="2">Wednesday</option>
+                    <option value="3">Thursday</option>
+                    <option value="4">Friday 🔥</option>
+                    <option value="5">Saturday 🔥</option>
+                    <option value="6">Sunday</option>
+                  </select>
+                  <span className="hint">Fridays/Saturdays surge more!</span>
                 </div>
               </div>
 

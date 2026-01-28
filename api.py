@@ -96,6 +96,10 @@ def prepare_features(data):
     hour_sin = np.sin(2 * np.pi * hour / 24)
     hour_cos = np.cos(2 * np.pi * hour / 24)
     
+    # Get day of week (default to Monday if not provided)
+    day_of_week = data.get('dayOfWeek', 0)  # 0=Monday, 6=Sunday
+    is_weekend = 1 if day_of_week >= 5 else 0
+    
     # Create feature array in correct order
     features = np.array([[
         data['supplyElasticity'],
@@ -106,7 +110,9 @@ def prepare_features(data):
         data['temp'],
         data['precip'],
         hour_sin,
-        hour_cos
+        hour_cos,
+        day_of_week,
+        is_weekend
     ]])
     
     return features
@@ -180,7 +186,9 @@ def model_info():
                 'Temperature',
                 'Precipitation',
                 'Hour_Sin',
-                'Hour_Cos'
+                'Hour_Cos',
+                'Day_of_Week',
+                'Is_Weekend'
             ]
         })
     except Exception as e:

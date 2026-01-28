@@ -62,24 +62,33 @@ function App() {
   const handlePredict = async () => {
     setLoading(true)
     
-    // Simulate API call - in production, this would call your Flask/FastAPI backend
-    setTimeout(() => {
-      // Mock prediction (replace with actual API call)
-      const mockPrediction = 
-        input.lagDER15 * 0.4 + 
-        input.lagDER30 * 0.2 + 
-        input.supplyElasticity * 0.3 +
-        (input.demandVelocity / 10) * 0.1
+    try {
+      // Call real Flask API
+      const response = await fetch('http://localhost:8000/predict', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(input)
+      })
       
-      const surgeLevel = getSurgeLevel(mockPrediction)
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status}`)
+      }
+      
+      const data = await response.json()
       
       setResult({
-        prediction: mockPrediction,
-        confidence: '87%',
-        surgeLevel
+        prediction: data.prediction,
+        confidence: data.confidence,
+        surgeLevel: data.surgeLevel
       })
+    } catch (error) {
+      console.error('Prediction failed:', error)
+      alert('Failed to get prediction. Is the API running on port 8000?')
+    } finally {
       setLoading(false)
-    }, 800)
+    }
   }
 
   const handleLoadSample = (scenario: 'morning' | 'evening' | 'rainy') => {

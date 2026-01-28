@@ -15,9 +15,9 @@ PROCESSED_DIR = './processed_data/'
 MODEL_DIR = './models/'
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# Features and target
+# Features and target (using actual column names from retrieval.py)
 FEATURES = ['SupplyElasticity', 'Lag_DER_t-15', 'Lag_DER_t-30', 
-            'DemandVelocity', 'Lag_DemandVelocity_t-15']
+            'DemandVelocity_t', 'Lag_DemandVelocity_t-15']
 TARGET = 'Target_DER_t+15'
 
 def train_and_save():

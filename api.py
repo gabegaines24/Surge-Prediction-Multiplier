@@ -175,7 +175,7 @@ def model_info():
                 'SupplyElasticity',
                 'Lag_DER_t-15',
                 'Lag_DER_t-30',
-                'DemandVelocity',
+                'DemandVelocity_t',
                 'Lag_DemandVelocity_t-15',
                 'Temperature',
                 'Precipitation',
@@ -198,7 +198,7 @@ if __name__ == '__main__':
     print("  GET  /health      - Health check")
     print("  POST /predict     - Make prediction")
     print("  GET  /model-info  - Model information")
-    print("\nStarting server on http://localhost:5000")
+    print("\nStarting server on http://localhost:8000")
     print("=" * 60)
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=8000, debug=True)

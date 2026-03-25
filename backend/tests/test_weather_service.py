@@ -8,17 +8,20 @@ import sys
 import os
 
 # Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(
+    0,
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),  
+)
 
-from weather_service import fetch_nyc_weather
+from backend.weather_service import fetch_nyc_weather
 
 
 class TestFetchNYCWeather:
     """Tests for the fetch_nyc_weather function."""
     
-    @patch('weather_service.openmeteo_requests.Client')
-    @patch('weather_service.retry')
-    @patch('weather_service.requests_cache.CachedSession')
+    @patch('backend.weather_service.openmeteo_requests.Client')
+    @patch('backend.weather_service.retry')
+    @patch('backend.weather_service.requests_cache.CachedSession')
     def test_api_called_with_correct_parameters(self, mock_cache, mock_retry, mock_client):
         """Test that the API is called with correct NYC coordinates and dates."""
         # Set up the mock chain
@@ -64,9 +67,9 @@ class TestFetchNYCWeather:
         assert 'temperature_2m' in params['hourly']
         assert 'precipitation' in params['hourly']
     
-    @patch('weather_service.openmeteo_requests.Client')
-    @patch('weather_service.retry')
-    @patch('weather_service.requests_cache.CachedSession')
+    @patch('backend.weather_service.openmeteo_requests.Client')
+    @patch('backend.weather_service.retry')
+    @patch('backend.weather_service.requests_cache.CachedSession')
     def test_returns_dataframe_with_correct_columns(self, mock_cache, mock_retry, mock_client):
         """Test that returned DataFrame has expected structure."""
         # Set up mocks
@@ -102,9 +105,9 @@ class TestFetchNYCWeather:
         assert 'precip' in result.columns
         assert len(result.columns) == 3
     
-    @patch('weather_service.openmeteo_requests.Client')
-    @patch('weather_service.retry')
-    @patch('weather_service.requests_cache.CachedSession')
+    @patch('backend.weather_service.openmeteo_requests.Client')
+    @patch('backend.weather_service.retry')
+    @patch('backend.weather_service.requests_cache.CachedSession')
     def test_resamples_to_15min_intervals(self, mock_cache, mock_retry, mock_client):
         """Test that hourly data is resampled to 15-minute intervals."""
         # Set up mocks
@@ -141,9 +144,9 @@ class TestFetchNYCWeather:
         time_diffs = result['Time_Bin'].diff().dropna()
         assert all(diff == pd.Timedelta('15min') for diff in time_diffs)
     
-    @patch('weather_service.openmeteo_requests.Client')
-    @patch('weather_service.retry')
-    @patch('weather_service.requests_cache.CachedSession')
+    @patch('backend.weather_service.openmeteo_requests.Client')
+    @patch('backend.weather_service.retry')
+    @patch('backend.weather_service.requests_cache.CachedSession')
     def test_handles_date_range_correctly(self, mock_cache, mock_retry, mock_client):
         """Test that the correct date range is processed."""
         mock_session = Mock()

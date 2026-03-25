@@ -24,7 +24,7 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 cachetools>=5.3.0
 
-# Optional experiment tracking (enable in config.yaml or SURGE_MLFLOW_ENABLED=1)
+# Optional experiment tracking (enable in backend/config.yaml or SURGE_MLFLOW_ENABLED=1)
 mlflow>=2.10.0
 
 # Progress visualization

@@ -14,14 +14,14 @@ import math
 import joblib
 import pandas as pd
 
-from config_loader import load_config
-from modeling import (
+from .config_loader import load_config
+from .modeling import (
     prepare_cyclical_features,
     time_series_cv_scores,
     train_surge_model,
     tune_hyperparameters,
 )
-from weather_service import fetch_nyc_weather
+from .weather_service import fetch_nyc_weather
 
 TARGET = "Target_DER_t+15"
 
@@ -82,7 +82,7 @@ def train_and_save() -> object:
         df_test = pd.read_parquet(f"{processed_dir}/test_data.parquet")
     except FileNotFoundError as e:
         print(f"Missing parquet data: {e}")
-        print("Run retrieval.py first to build train/test parquet files.")
+        print("Run `python -m backend.retrieval` first to build train/test parquet files.")
         raise
     print(f"  Train: {df_train.shape}, Test: {df_test.shape}")
 
@@ -193,7 +193,7 @@ def train_and_save() -> object:
     print("✓ MODEL READY FOR DEPLOYMENT")
     print("=" * 60)
     print("\nNext steps:")
-    print("  1. Start API: uvicorn api:app --host 0.0.0.0 --port 8000")
+    print("  1. Start API: uvicorn backend.api:app --host 0.0.0.0 --port 8000")
     print("  2. Test: curl http://localhost:8000/health")
     print("  3. Frontend: cd frontend && npm run dev")
     print("=" * 60)

@@ -8,9 +8,12 @@ import sys
 import os
 
 # Add parent directory to path so we can import the modules
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(
+    0,
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+)
 
-from retrieval import standardize_columns, create_time_series_features
+from backend.retrieval import standardize_columns, create_time_series_features
 
 
 def _ts_result_df(result: pd.DataFrame) -> pd.DataFrame:

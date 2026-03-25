@@ -8,9 +8,12 @@ import sys
 import os
 
 # Add parent directory to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(
+    0,
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+)
 
-from modeling import prepare_cyclical_features, train_surge_model
+from backend.modeling import prepare_cyclical_features, train_surge_model
 
 
 class TestPrepareCyclicalFeatures:

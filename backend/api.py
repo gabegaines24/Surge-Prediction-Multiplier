@@ -19,9 +19,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from config_loader import load_config
-from feature_engineering import add_calendar_from_hour_dow
-from zone_metadata import add_zone_hint_features
+from .config_loader import load_config
+from .feature_engineering import add_calendar_from_hour_dow
+from .zone_metadata import add_zone_hint_features
 
 _cfg = load_config()
 MODEL_DIR = _cfg["paths"]["model_dir"]
@@ -44,7 +44,7 @@ def load_model() -> None:
     global model, feature_names, model_mtime
     if not os.path.exists(MODEL_PATH):
         print(f"⚠️  Model not found at {MODEL_PATH}")
-        print("   Run train_model.py first.")
+        print("   Run `python -m backend.train_model` first.")
         model = None
         feature_names = []
         model_mtime = 0.0
@@ -144,7 +144,7 @@ def _build_matrix(req: PredictRequest) -> np.ndarray:
     if not feature_names:
         raise HTTPException(
             status_code=500,
-            detail="Model metadata missing feature list. Retrain with train_model.py.",
+            detail="Model metadata missing feature list. Retrain with `python -m backend.train_model`.",
         )
     values = _inference_feature_dict(req)
     row: list[float] = []
@@ -225,7 +225,7 @@ def predict(body: PredictRequest) -> dict[str, Any]:
     if model is None:
         raise HTTPException(
             status_code=500,
-            detail="Model not loaded. Run train_model.py first.",
+            detail="Model not loaded. Run `python -m backend.train_model` first.",
         )
     X = _build_matrix(body)
     ck = _cache_key_for_matrix(X)
@@ -275,7 +275,7 @@ def model_info() -> dict[str, Any]:
 
 
 # Legacy Flask-style entry removed; run with:
-#   uvicorn api:app --host 0.0.0.0 --port 8000
+#   uvicorn backend.api:app --host 0.0.0.0 --port 8000
 if __name__ == "__main__":
     import uvicorn
 

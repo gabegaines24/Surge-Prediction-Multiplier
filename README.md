@@ -11,7 +11,9 @@ The goal is to transition from reactive surge pricing to proactive demand manage
 - **Language**: Python 3.x
 - **Big Data Engine**: Dask (for out-of-core parallel processing of 70M+ records)
 - **Data Analysis**: Pandas, NumPy
-- **Machine Learning**: XGBoost / LightGBM
+- **Machine Learning**: XGBoost (with optional hyperparameter tuning & time-series CV)
+- **API**: FastAPI + Uvicorn (loads feature order from `models/model_info.pkl`)
+- **Config**: `config.yaml` (paths, model hyperparameters, MLflow toggle, outlier bounds)
 - **APIs**: Open-Meteo (Historical Weather), NYC TLC (Trip Records)
 - **Environment**: Virtual Environments (.venv), Jupyter/Neovim
 
@@ -52,6 +54,14 @@ Standard random splits are avoided to prevent data leakage. We implement a stric
 
 - **Training**: January – October
 - **Testing**: November (Unseen "future" data)
+
+## Training & serving
+
+1. **Process data** (Dask): `python retrieval.py`
+2. **Train & save model**: `python train_model.py` (writes `models/xgboost_surge_model.pkl`, versioned copy, and `model_info.pkl`)
+3. **Run API**: `uvicorn api:app --host 0.0.0.0 --port 8000`
+
+Optional: set `mlflow.enabled: true` in `config.yaml` or `SURGE_MLFLOW_ENABLED=1` for experiment tracking.
 
 ## Running Tests
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Memory and Progress Monitor for Dask Processing
-Run this in a separate terminal while retrieval.py is running
+Run this in a separate terminal while `python -m backend.retrieval` is running
 """
 
 import psutil

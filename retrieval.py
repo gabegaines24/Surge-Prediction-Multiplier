@@ -6,6 +6,10 @@ import dask
 import dask.dataframe as dd
 from dask.diagnostics import ProgressBar
 
+from config_loader import load_config
+from feature_engineering import add_calendar_and_rush_features
+from zone_metadata import add_zone_hint_features
+
 # Configure Dask for memory efficiency
 dask.config.set({
     'dataframe.shuffle.method': 'tasks',  # More memory efficient for groupby operations
@@ -14,9 +18,26 @@ dask.config.set({
     'distributed.worker.memory.pause': 0.95,   # Pause at 95%
 })
 
-DATA_DIR = './taxi data/'
-OUTPUT_DIR = './processed_data/'  # Where we'll save processed chunks
+_cfg = load_config()
+DATA_DIR = _cfg["paths"]["taxi_data_dir"]
+OUTPUT_DIR = _cfg["paths"]["processed_dir"]
 os.makedirs(OUTPUT_DIR, exist_ok=True)
+DER_OUTLIER_UPPER = float(_cfg["data"]["der_outlier_upper"])
+DER_OUTLIER_LOWER = float(_cfg["data"]["der_outlier_lower"])
+MIN_ACTIVE_REQUESTS = int(_cfg["data"]["min_active_requests"])
+SPLIT_DATE = pd.to_datetime(_cfg["data"]["train_test_split_date"])
+
+
+def _validate_processed_sample(sample_df: pd.DataFrame) -> None:
+    """Lightweight checks before expensive parquet writes."""
+    required = {"Time_Bin", "Zone", "Target_DER_t+15", "Lag_DER_t-15", "DER_t"}
+    missing = required - set(sample_df.columns)
+    if missing:
+        raise ValueError(f"Processed data missing required columns: {sorted(missing)}")
+    if sample_df["Time_Bin"].isna().all():
+        raise ValueError("Time_Bin column is all NaN")
+    if len(sample_df) == 0:
+        raise ValueError("Train sample is empty after filtering")
 
 # Separate file paths by type (they have different column schemas!)
 yellow_files = glob(os.path.join(DATA_DIR, 'yellow_tripdata_*.parquet'))
@@ -171,23 +192,40 @@ def create_time_series_features(df):
     Custom function to create lagged features within each partition.
     This ensures groupby operations respect zone boundaries.
     """
-    # Ensure data is sorted within partition
+    df = df.copy()
+    # After set_index('Zone'), Zone may be the index — normalize to column for sorting
+    if 'Zone' not in df.columns:
+        df = df.reset_index()
     df = df.sort_values(by=['Zone', 'Time_Bin'])
-    
+
     # Shift the DER forward by one period (15 minutes) to create TARGET variable
     df['Target_DER_t+15'] = df.groupby('Zone')['DER_t'].shift(-1)
-    
+
     # Create Lagged DER features (Lagged Features: t-15 and t-30)
-    df['Lag_DER_t-15'] = df.groupby('Zone')['DER_t'].shift(1)  # Shift 1 period backward
-    df['Lag_DER_t-30'] = df.groupby('Zone')['DER_t'].shift(2)  # Shift 2 periods backward
-    
+    df['Lag_DER_t-15'] = df.groupby('Zone')['DER_t'].shift(1)
+    df['Lag_DER_t-30'] = df.groupby('Zone')['DER_t'].shift(2)
+
     # Calculate current Demand Velocity: Requests(t) - Requests(t-15)
     df['DemandVelocity_t'] = df.groupby('Zone')['ActiveRequests'].diff(periods=1)
-    
+
     # Lag the calculated Demand Velocity by one period
     df['Lag_DemandVelocity_t-15'] = df.groupby('Zone')['DemandVelocity_t'].shift(1)
-    
-    return df
+
+    # Rolling stats (4 x 15min = 1 hour) within zone
+    df['DER_rolling_mean_1h'] = df.groupby('Zone')['DER_t'].transform(
+        lambda s: s.rolling(window=4, min_periods=1).mean()
+    )
+    df['DER_rolling_std_1h'] = (
+        df.groupby('Zone')['DER_t'].transform(
+            lambda s: s.rolling(window=4, min_periods=1).std()
+        )
+        .fillna(0.0)
+    )
+
+    df = add_calendar_and_rush_features(df, 'Time_Bin')
+    df = add_zone_hint_features(df, 'Zone')
+
+    return df.set_index('Zone')
 
 # CRITICAL: For shift operations to work correctly across partitions,
 # we need to repartition by Zone to ensure each zone's data stays together
@@ -210,7 +248,16 @@ df_aggregate = df_aggregate.map_partitions(
         'Lag_DER_t-15': 'float64',
         'Lag_DER_t-30': 'float64',
         'DemandVelocity_t': 'float64',
-        'Lag_DemandVelocity_t-15': 'float64'
+        'Lag_DemandVelocity_t-15': 'float64',
+        'DER_rolling_mean_1h': 'float64',
+        'DER_rolling_std_1h': 'float64',
+        'month': 'int64',
+        'month_sin': 'float64',
+        'month_cos': 'float64',
+        'is_rush_hour': 'int64',
+        'is_holiday': 'int64',
+        'is_airport_zone': 'int64',
+        'is_manhattan_core': 'int64',
     }
 )
 
@@ -224,9 +271,6 @@ print("\n" + "=" * 60)
 print("SPLITTING DATA AND WRITING TO DISK...")
 print("=" * 60)
 
-# Define the split date (data is from Jan-Mar 2025, so split at Feb 15)
-SPLIT_DATE = pd.to_datetime('2025-02-15')
-
 # Separate the data using Dask filtering
 df_train = df_aggregate[df_aggregate['Time_Bin'] < SPLIT_DATE]
 df_test = df_aggregate[df_aggregate['Time_Bin'] >= SPLIT_DATE]
@@ -236,14 +280,42 @@ df_test = df_aggregate[df_aggregate['Time_Bin'] >= SPLIT_DATE]
 df_train = df_train.dropna(subset=['Target_DER_t+15'])
 df_test = df_test.dropna(subset=['Target_DER_t+15'])
 
-# Define features and target
-# We'll compute column names from a small sample
+# Outlier / quality filters (DER can explode when supply proxy is tiny)
+if DER_OUTLIER_UPPER > 0:
+    df_train = df_train[
+        (df_train['DER_t'] >= DER_OUTLIER_LOWER)
+        & (df_train['DER_t'] <= DER_OUTLIER_UPPER)
+        & (df_train['Target_DER_t+15'] >= DER_OUTLIER_LOWER)
+        & (df_train['Target_DER_t+15'] <= DER_OUTLIER_UPPER)
+    ]
+    df_test = df_test[
+        (df_test['DER_t'] >= DER_OUTLIER_LOWER)
+        & (df_test['DER_t'] <= DER_OUTLIER_UPPER)
+        & (df_test['Target_DER_t+15'] >= DER_OUTLIER_LOWER)
+        & (df_test['Target_DER_t+15'] <= DER_OUTLIER_UPPER)
+    ]
+
+if MIN_ACTIVE_REQUESTS > 0:
+    df_train = df_train[df_train['ActiveRequests'] >= MIN_ACTIVE_REQUESTS]
+    df_test = df_test[df_test['ActiveRequests'] >= MIN_ACTIVE_REQUESTS]
+
+# Define features and target from schema (exclude raw / target / ids we do not use as features)
 sample_cols = df_train.head(1).columns.tolist()
-FEATURES = [col for col in sample_cols if 'Lag' in col or 'Elasticity' in col or 'Velocity' in col]
+EXCLUDE_FROM_FEATURES = {
+    'Time_Bin',
+    'ActiveRequests',
+    'AvailableDriversProxy',
+    'DER_t',
+    'Target_DER_t+15',
+}
 TARGET = 'Target_DER_t+15'
+FEATURES = [c for c in sample_cols if c not in EXCLUDE_FROM_FEATURES]
 
 print(f"\nFeatures identified: {FEATURES}")
 print(f"Target: {TARGET}")
+
+print("\n[Validate] Schema check on train sample...")
+_validate_processed_sample(df_train.head(20))
 
 # ============================================================================
 # STEP 6: WRITE PROCESSED DATA TO DISK (Final Compute!)

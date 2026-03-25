@@ -13,6 +13,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from retrieval import standardize_columns, create_time_series_features
 
 
+def _ts_result_df(result: pd.DataFrame) -> pd.DataFrame:
+    """Pipeline uses Zone as index after feature transform; tests expect a Zone column."""
+    if "Zone" not in result.columns:
+        return result.reset_index()
+    return result
+
+
 class TestStandardizeColumns:
     """Tests for the standardize_columns function."""
     
@@ -62,7 +69,7 @@ class TestCreateTimeSeriesFeatures:
     
     def test_creates_target_variable(self, sample_time_series_df):
         """Test that the target variable is created by shifting DER forward."""
-        result = create_time_series_features(sample_time_series_df.copy())
+        result = _ts_result_df(create_time_series_features(sample_time_series_df.copy()))
         
         assert 'Target_DER_t+15' in result.columns
         
@@ -75,7 +82,7 @@ class TestCreateTimeSeriesFeatures:
     
     def test_creates_lagged_features(self, sample_time_series_df):
         """Test that lagged DER features are created correctly."""
-        result = create_time_series_features(sample_time_series_df.copy())
+        result = _ts_result_df(create_time_series_features(sample_time_series_df.copy()))
         
         assert 'Lag_DER_t-15' in result.columns
         assert 'Lag_DER_t-30' in result.columns
@@ -89,7 +96,7 @@ class TestCreateTimeSeriesFeatures:
     
     def test_creates_demand_velocity(self, sample_time_series_df):
         """Test that demand velocity is calculated as difference in requests."""
-        result = create_time_series_features(sample_time_series_df.copy())
+        result = _ts_result_df(create_time_series_features(sample_time_series_df.copy()))
         
         assert 'DemandVelocity_t' in result.columns
         assert 'Lag_DemandVelocity_t-15' in result.columns
@@ -103,7 +110,7 @@ class TestCreateTimeSeriesFeatures:
     
     def test_operations_grouped_by_zone(self, sample_time_series_df):
         """Test that all operations respect zone boundaries."""
-        result = create_time_series_features(sample_time_series_df.copy())
+        result = _ts_result_df(create_time_series_features(sample_time_series_df.copy()))
         
         # First row of each zone should have NaN for lagged features
         zone_161_first = result[result['Zone'] == 161].sort_values('Time_Bin').iloc[0]
@@ -121,7 +128,7 @@ class TestCreateTimeSeriesFeatures:
     
     def test_two_period_lag_correct(self, sample_time_series_df):
         """Test that 2-period lag (t-30) is correctly calculated."""
-        result = create_time_series_features(sample_time_series_df.copy())
+        result = _ts_result_df(create_time_series_features(sample_time_series_df.copy()))
         
         # For zone 161, lag_t-30 at t=2 should equal DER at t=0
         zone_161 = result[result['Zone'] == 161].sort_values('Time_Bin')

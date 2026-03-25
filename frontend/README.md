@@ -67,47 +67,22 @@ npm run build
 
 To connect this frontend to your Python backend:
 
-1. Create a Flask/FastAPI endpoint:
+1. Start the FastAPI backend (from project root, after `python train_model.py`):
 
-```python
-# api.py
-from flask import Flask, request, jsonify
-import joblib
-import numpy as np
-
-app = Flask(__name__)
-model = joblib.load('model.pkl')
-
-@app.route('/predict', methods=['POST'])
-def predict():
-    data = request.json
-    features = np.array([[
-        data['supplyElasticity'],
-        data['lagDER15'],
-        data['lagDER30'],
-        data['demandVelocity'],
-        data['lagDemandVelocity15'],
-        data['temp'],
-        data['precip'],
-        np.sin(2 * np.pi * data['hour'] / 24),
-        np.cos(2 * np.pi * data['hour'] / 24)
-    ]])
-    
-    prediction = model.predict(features)[0]
-    return jsonify({'prediction': float(prediction)})
-
-if __name__ == '__main__':
-    app.run(port=5000)
+```bash
+uvicorn api:app --host 0.0.0.0 --port 8000
 ```
 
-2. Update `App.tsx` to call the API:
+The API loads the trained model and feature list from `models/`. `POST /predict` accepts the same JSON fields as this frontend (`supplyElasticity`, `lagDER15`, `dayOfWeek`, etc.).
+
+2. Ensure `App.tsx` calls the API (default port **8000**):
 
 ```typescript
 const handlePredict = async () => {
   setLoading(true)
   
   try {
-    const response = await fetch('http://localhost:5000/predict', {
+    const response = await fetch('http://localhost:8000/predict', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input)

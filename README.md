@@ -13,9 +13,16 @@ The goal is to transition from reactive surge pricing to proactive demand manage
 - **Data Analysis**: Pandas, NumPy
 - **Machine Learning**: XGBoost (with optional hyperparameter tuning & time-series CV)
 - **API**: FastAPI + Uvicorn (loads feature order from `models/model_info.pkl`)
-- **Config**: `config.yaml` (paths, model hyperparameters, MLflow toggle, outlier bounds)
+- **Config**: `backend/config.yaml` (paths, model hyperparameters, MLflow toggle, outlier bounds)
 - **APIs**: Open-Meteo (Historical Weather), NYC TLC (Trip Records)
 - **Environment**: Virtual Environments (.venv), Jupyter/Neovim
+
+## Repo Layout
+
+1. `frontend/`: React UI
+2. `backend/`: FastAPI server + training/retrieval pipeline code
+3. `models/`: saved model artifacts (`xgboost_surge_model*.pkl`, `model_info.pkl`)
+4. `processed_data/`, `taxi data/`: intermediate and raw data (Dask pipeline)
 
 ## Data Pipeline & Architecture
 
@@ -57,11 +64,11 @@ Standard random splits are avoided to prevent data leakage. We implement a stric
 
 ## Training & serving
 
-1. **Process data** (Dask): `python retrieval.py`
-2. **Train & save model**: `python train_model.py` (writes `models/xgboost_surge_model.pkl`, versioned copy, and `model_info.pkl`)
-3. **Run API**: `uvicorn api:app --host 0.0.0.0 --port 8000`
+1. **Process data (Dask)**: `python -m backend.retrieval`
+2. **Train & save model**: `python -m backend.train_model` (writes `models/xgboost_surge_model.pkl`, versioned copy, and `model_info.pkl`)
+3. **Run API**: `uvicorn backend.api:app --host 0.0.0.0 --port 8000`
 
-Optional: set `mlflow.enabled: true` in `config.yaml` or `SURGE_MLFLOW_ENABLED=1` for experiment tracking.
+Optional: set `mlflow.enabled: true` in `backend/config.yaml` or `SURGE_MLFLOW_ENABLED=1` for experiment tracking.
 
 ## Running Tests
 
@@ -76,30 +83,30 @@ pip install -e ".[dev]"
 ### Run All Tests
 
 ```bash
-pytest tests/
+pytest backend/tests/
 ```
 
 ### Run with Coverage Report
 
 ```bash
-pytest tests/ --cov=. --cov-report=term-missing
+pytest backend/tests/ --cov=. --cov-report=term-missing
 ```
 
 ### Run Specific Test Files
 
 ```bash
 # Test data retrieval functions
-pytest tests/test_retrieval.py -v
+pytest backend/tests/test_retrieval.py -v
 
 # Test weather service
-pytest tests/test_weather_service.py -v
+pytest backend/tests/test_weather_service.py -v
 
 # Test modeling functions
-pytest tests/test_modeling.py -v
+pytest backend/tests/test_modeling.py -v
 ```
 
 ### Run a Specific Test
 
 ```bash
-pytest tests/test_retrieval.py::TestStandardizeColumns::test_standardize_yellow_taxi_columns -v
+pytest backend/tests/test_retrieval.py::TestStandardizeColumns::test_standardize_yellow_taxi_columns -v
 ```

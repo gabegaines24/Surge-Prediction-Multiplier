@@ -67,10 +67,10 @@ npm run build
 
 To connect this frontend to your Python backend:
 
-1. Start the FastAPI backend (from project root, after `python train_model.py`):
+1. Start the FastAPI backend (from project root, after `python -m backend.train_model`):
 
 ```bash
-uvicorn api:app --host 0.0.0.0 --port 8000
+uvicorn backend.api:app --host 0.0.0.0 --port 8000
 ```
 
 The API loads the trained model and feature list from `models/`. `POST /predict` accepts the same JSON fields as this frontend (`supplyElasticity`, `lagDER15`, `dayOfWeek`, etc.).

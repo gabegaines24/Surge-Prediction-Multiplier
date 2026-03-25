@@ -6,6 +6,7 @@ Loads feature order from model_info.pkl so training/API stay aligned.
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from datetime import datetime
 from typing import Any, Optional
@@ -101,9 +102,40 @@ class PredictRequest(BaseModel):
     def _coerce_int(cls, v: Any) -> int:
         return int(v)
 
+    @field_validator(
+        "supply_elasticity",
+        "lag_der_15",
+        "lag_der_30",
+        "demand_velocity",
+        "lag_demand_velocity_15",
+        "temp",
+        "precip",
+        "der_rolling_mean_1h",
+        "der_rolling_std_1h",
+        mode="before",
+    )
+    @classmethod
+    def _validate_finite_float(cls, v: Any) -> Any:
+        if v is None:
+            return None
+        val = float(v)
+        if not math.isfinite(val):
+            raise ValueError("must be a finite number")
+        return val
 
-def _inference_feature_dict(req: PredictRequest) -> dict[str, float]:
+
+def _inference_feature_dict(req: PredictRequest) -> tuple[dict[str, float], list[str]]:
     """Single-row feature dictionary aligned with training column names."""
+    defaults_used: list[str] = []
+    if req.month is None:
+        defaults_used.append("month")
+    if req.is_holiday is None:
+        defaults_used.append("isHoliday")
+    if req.der_rolling_mean_1h is None:
+        defaults_used.append("derRollingMean1h")
+    if req.der_rolling_std_1h is None:
+        defaults_used.append("derRollingStd1h")
+
     cal = add_calendar_from_hour_dow(
         req.hour,
         req.day_of_week,
@@ -137,16 +169,16 @@ def _inference_feature_dict(req: PredictRequest) -> dict[str, float]:
         "is_manhattan_core": float(z["is_manhattan_core"].iloc[0]),
         "Zone": float(req.zone_id),
     }
-    return d
+    return d, defaults_used
 
 
-def _build_matrix(req: PredictRequest) -> np.ndarray:
+def _build_matrix(req: PredictRequest) -> tuple[np.ndarray, list[str]]:
     if not feature_names:
         raise HTTPException(
             status_code=500,
             detail="Model metadata missing feature list. Retrain with `python -m backend.train_model`.",
         )
-    values = _inference_feature_dict(req)
+    values, defaults_used = _inference_feature_dict(req)
     row: list[float] = []
     missing: list[str] = []
     for name in feature_names:
@@ -159,7 +191,7 @@ def _build_matrix(req: PredictRequest) -> np.ndarray:
             status_code=400,
             detail=f"Cannot satisfy features (add to request or retrain): {missing[:8]}",
         )
-    return np.array([row], dtype=np.float32)
+    return np.array([row], dtype=np.float32), defaults_used
 
 
 def _cache_key_for_matrix(X: np.ndarray) -> str:
@@ -227,7 +259,7 @@ def predict(body: PredictRequest) -> dict[str, Any]:
             status_code=500,
             detail="Model not loaded. Run `python -m backend.train_model` first.",
         )
-    X = _build_matrix(body)
+    X, defaults_used = _build_matrix(body)
     ck = _cache_key_for_matrix(X)
     if ck in _predict_cache:
         return dict(_predict_cache[ck])
@@ -240,6 +272,7 @@ def predict(body: PredictRequest) -> dict[str, Any]:
         "surgeLevel": surge,
         "confidence": f"{confidence:.0%}",
         "recommendation": get_recommendation(prediction, body.precip),
+        "defaultsUsed": defaults_used,
         "timestamp": datetime.now().isoformat(),
     }
     _predict_cache[ck] = out

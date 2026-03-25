@@ -49,10 +49,14 @@ class TestFetchNYCWeather:
         # Call the function
         result = fetch_nyc_weather("2025-01-01", "2025-01-02")
         
-        # Verify API was called with NYC coordinates
+        # Verify API was called with NYC coordinates (url + params may be positional or kwargs)
         call_args = mock_openmeteo.weather_api.call_args
-        params = call_args[0][1]  # Second positional argument is params dict
-        
+        params = (
+            call_args.kwargs.get("params")
+            if call_args is not None and call_args.kwargs
+            else call_args[0][1]
+        )
+
         assert params['latitude'] == 40.7128
         assert params['longitude'] == -74.0060
         assert params['start_date'] == "2025-01-01"
@@ -168,6 +172,7 @@ class TestFetchNYCWeather:
         result = fetch_nyc_weather("2025-01-15", "2025-01-16")
         
         # Verify the dates were passed correctly
-        call_args = mock_openmeteo.weather_api.call_args[0][1]
-        assert call_args['start_date'] == "2025-01-15"
-        assert call_args['end_date'] == "2025-01-16"
+        ca = mock_openmeteo.weather_api.call_args
+        passed = ca.kwargs.get("params") if ca.kwargs else ca[0][1]
+        assert passed['start_date'] == "2025-01-15"
+        assert passed['end_date'] == "2025-01-16"

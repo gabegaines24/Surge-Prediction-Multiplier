@@ -320,7 +320,6 @@ if os.path.isfile(_index_html):
         name="spa",
     )
 
-
 # Legacy Flask-style entry removed; run with:
 #   uvicorn backend.api:app --host 0.0.0.0 --port 8000
 if __name__ == "__main__":

@@ -65,7 +65,7 @@ function App() {
     setLoading(true)
     
     try {
-      // Call real Flask API
+      // Same-origin when API serves the built SPA (Docker); use Vite proxy locally if needed.
       const response = await fetch('/predict', {
         method: 'POST',
         headers: {

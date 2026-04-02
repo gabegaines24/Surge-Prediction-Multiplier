@@ -1,0 +1,12 @@
+.venv
+venv
+node_modules
+frontend/node_modules
+**/__pycache__
+*.py[cod]
+*.parquet
+taxi data
+processed_data
+.git
+.pytest_cache
+.gitignore

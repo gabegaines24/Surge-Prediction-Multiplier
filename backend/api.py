@@ -19,6 +19,7 @@ from cachetools import TTLCache
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.staticfiles import StaticFiles
 
 from .config_loader import load_config
 from .feature_engineering import add_calendar_from_hour_dow
@@ -305,6 +306,19 @@ def model_info() -> dict[str, Any]:
         "metrics": _json_safe_metrics(dict(info_extra.get("metrics", {}))),
         "artifact": info_extra.get("artifact_version", MODEL_PATH),
     }
+
+
+# React production build (Docker / Hugging Face). Mounted last so API routes win.
+_FRONTEND_DIST = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "frontend_dist")
+)
+_index_html = os.path.join(_FRONTEND_DIST, "index.html")
+if os.path.isfile(_index_html):
+    app.mount(
+        "/",
+        StaticFiles(directory=_FRONTEND_DIST, html=True),
+        name="spa",
+    )
 
 
 # Legacy Flask-style entry removed; run with:

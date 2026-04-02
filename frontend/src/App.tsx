@@ -66,7 +66,7 @@ function App() {
     
     try {
       // Call real Flask API
-      const response = await fetch('http://localhost:8000/predict', {
+      const response = await fetch('/predict', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

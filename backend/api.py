@@ -62,7 +62,17 @@ def load_model() -> None:
     print(f"✓ Model loaded from {MODEL_PATH} ({len(feature_names)} features)")
 
 
-app = FastAPI(title="NYC Taxi Surge Prediction API", version="2.0.0")
+app = FastAPI(
+    title="NYC Taxi Surge Prediction API",
+    version="2.0.0",
+    description=(
+        "Predicts Demand Excess Ratio (DER) for NYC TLC zones using a trained XGBoost model. "
+        "Use **GET /health** and **GET /model-info** for readiness and artifact metadata; "
+        "**POST /predict** accepts camelCase JSON aligned with the web UI."
+    ),
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

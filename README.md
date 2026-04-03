@@ -1,5 +1,16 @@
 # Dynamic Surge Prediction: Spatio-Temporal Modeling for Ride-Sharing
 
+## Try the demo
+
+- **Docker (API + built UI, port 7860):** from the repo root, `docker build -t surge-pred .` then  
+  `docker run --rm -p 7860:7860 surge-pred`  
+  Open `http://localhost:7860` — the React app and `/predict` share the same origin.
+- **Local dev:** terminal A: `uvicorn backend.api:app --reload --port 8000`  
+  terminal B: `cd frontend && npm install && npm run dev` (Vite proxies `/predict`, `/health`, `/model-info` to the API).
+- **Interactive API docs:** with the backend running, visit `/docs` (Swagger) or `/redoc`.
+
+For deployment on **Hugging Face Spaces**, use the included `Dockerfile` and your Space secrets as needed. A **public demo notice** appears in the web UI: outputs are illustrative, not operational guidance.
+
 ## Project Overview
 
 This project builds a predictive engine designed to forecast ride-sharing Surge Multipliers (via Demand Excess Ratios) for specific geographic zones in New York City. By analyzing 70M+ rows of taxi trip data, the model predicts supply-demand imbalances 15 minutes into the future.

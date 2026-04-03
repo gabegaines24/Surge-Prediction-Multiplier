@@ -17,6 +17,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
+COPY MODEL_CARD.md ./
 COPY --from=frontend /src/frontend/dist ./frontend_dist
 COPY models/ ./models/
 

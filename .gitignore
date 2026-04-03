@@ -15,3 +15,6 @@ guides/*
 
 # Local roadmap / personal next steps (not shared)
 future-updates.local.md
+
+# TLC download manifest (checksums; parquet already ignored)
+taxi data/.tlc_manifest.json

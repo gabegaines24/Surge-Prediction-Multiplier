@@ -25,6 +25,31 @@ def _mean_absolute_percentage_error(
     return float(np.mean(np.abs((y_true - y_pred) / denom)) * 100.0)
 
 
+def compute_residual_calibration(
+    y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series
+) -> Dict[str, Any]:
+    """
+    Empirical residual quantiles on the holdout set for uncertainty intervals.
+    Intervals are not calibrated probabilities; they summarize test-set error spread.
+    """
+    yt = np.asarray(y_true, dtype=float)
+    yp = np.asarray(y_pred, dtype=float)
+    residuals = yt - yp
+    abs_r = np.abs(residuals)
+    return {
+        "holdout_residual_quantiles": {
+            "p10": float(np.quantile(residuals, 0.1)),
+            "p50": float(np.quantile(residuals, 0.5)),
+            "p90": float(np.quantile(residuals, 0.9)),
+        },
+        "holdout_abs_residual_quantiles": {
+            "p50": float(np.quantile(abs_r, 0.5)),
+            "p90": float(np.quantile(abs_r, 0.9)),
+        },
+        "method": "empirical_residuals_on_holdout",
+    }
+
+
 def compute_regression_metrics(
     y_true: np.ndarray | pd.Series, y_pred: np.ndarray | pd.Series
 ) -> Dict[str, float]:

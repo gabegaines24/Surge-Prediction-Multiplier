@@ -11,6 +11,8 @@
 
 For deployment on **Hugging Face Spaces**, use the included `Dockerfile` and your Space secrets as needed. A **public demo notice** appears in the web UI: outputs are illustrative, not operational guidance.
 
+**Transparency:** See [`MODEL_CARD.md`](MODEL_CARD.md) for limitations, biases, and how API uncertainty fields are defined. After retraining, `GET /model-info` includes `data` (split dates, weather window) and `calibration` (holdout residual stats).
+
 ## Project Overview
 
 This project builds a predictive engine designed to forecast ride-sharing Surge Multipliers (via Demand Excess Ratios) for specific geographic zones in New York City. By analyzing 70M+ rows of taxi trip data, the model predicts supply-demand imbalances 15 minutes into the future.
@@ -66,18 +68,26 @@ The Demand Excess Ratio (DER) at t+15 minutes:
 y = Active_Requests(t+15) / Available_Drivers(t+15)
 ```
 
-### Validation Strategy: Walk-Forward Validation
+### Train / validation split (time-ordered)
 
-Standard random splits are avoided to prevent data leakage. We implement a strict time-series split:
+The Dask pipeline assigns rows by **`Time_Bin`** relative to `data.train_test_split_date` in `backend/config.yaml`:
 
-- **Training**: January – October
-- **Testing**: November (Unseen "future" data)
+- **Train:** `Time_Bin < train_test_split_date` (after outlier / quality filters).
+- **Test:** `Time_Bin >= train_test_split_date`.
+
+Weather joins use **`weather_start`**–**`weather_end`** (same file). When you **refresh TLC Parquet** with newer months, update those fields so weather covers the trip window, bump **`train_test_split_date`** to keep a forward holdout, then rerun retrieval and training.
 
 ## Training & serving
 
-1. **Process data (Dask)**: `python -m backend.retrieval`
-2. **Train & save model**: `python -m backend.train_model` (writes `models/xgboost_surge_model.pkl`, versioned copy, and `model_info.pkl`)
+1. **Process data (Dask)**: `python -m backend.retrieval` (requires TLC Parquet under `paths.taxi_data_dir`)
+2. **Train & save model**: `python -m backend.train_model` (writes `models/xgboost_surge_model.pkl`, versioned copy, and `model_info.pkl` with **calibration** and **data provenance**)
 3. **Run API**: `uvicorn backend.api:app --host 0.0.0.0 --port 8000`
+
+**API transparency endpoints** (after install, including `shap` for TreeSHAP):
+
+- `GET /interpretability/global-importance` — global gain importances
+- `POST /interpretability/shap` — same JSON body as `/predict`, local SHAP values (`max_features` query param)
+- `POST /predict` — includes `uncertainty` (tree dispersion + optional holdout residual band when `model_info.pkl` has calibration)
 
 Optional: set `mlflow.enabled: true` in `backend/config.yaml` or `SURGE_MLFLOW_ENABLED=1` for experiment tracking.
 

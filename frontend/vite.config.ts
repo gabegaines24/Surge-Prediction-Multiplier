@@ -9,6 +9,7 @@ export default defineConfig({
       '/predict': 'http://127.0.0.1:8000',
       '/health': 'http://127.0.0.1:8000',
       '/model-info': 'http://127.0.0.1:8000',
+      '/interpretability': 'http://127.0.0.1:8000',
     },
   },
 })

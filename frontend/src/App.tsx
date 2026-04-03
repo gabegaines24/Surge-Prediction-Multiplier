@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
 
 interface PredictionInput {
@@ -19,6 +19,28 @@ interface PredictionResult {
   surgeLevel: string
 }
 
+interface ModelInfoPayload {
+  algorithm?: string
+  n_estimators?: number
+  features?: string[]
+  metrics?: Record<string, number | null>
+}
+
+function formatApiError(payload: unknown): string {
+  if (payload && typeof payload === 'object' && 'detail' in payload) {
+    const d = (payload as { detail: unknown }).detail
+    if (typeof d === 'string') return d
+    if (Array.isArray(d)) {
+      const first = d[0]
+      if (first && typeof first === 'object' && 'msg' in first) {
+        return String((first as { msg: unknown }).msg)
+      }
+      return 'Invalid request — check inputs.'
+    }
+  }
+  return 'Unable to complete prediction.'
+}
+
 function App() {
   const [input, setInput] = useState<PredictionInput>({
     supplyElasticity: 0.8,
@@ -34,20 +56,33 @@ function App() {
   
   const [result, setResult] = useState<PredictionResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [modelInfo, setModelInfo] = useState<{
+    loading: boolean
+    data: ModelInfoPayload | null
+  }>({ loading: true, data: null })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/model-info')
+        if (!res.ok) throw new Error('model-info failed')
+        const data = (await res.json()) as ModelInfoPayload
+        if (!cancelled) setModelInfo({ loading: false, data })
+      } catch {
+        if (!cancelled) setModelInfo({ loading: false, data: null })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const handleInputChange = (field: keyof PredictionInput, value: string) => {
     setInput(prev => ({
       ...prev,
       [field]: parseFloat(value) || 0
     }))
-  }
-
-  const getSurgeLevel = (der: number): string => {
-    if (der < 0.8) return 'Low Demand'
-    if (der < 1.2) return 'Normal'
-    if (der < 1.5) return 'Moderate Surge'
-    if (der < 2.0) return 'High Surge'
-    return 'Extreme Surge'
   }
 
   const getSurgeLevelColor = (level: string): string => {
@@ -74,12 +109,15 @@ function App() {
         body: JSON.stringify(input)
       })
       
+      const raw = await response.json().catch(() => ({}))
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`)
+        throw new Error(formatApiError(raw) || `Error ${response.status}`)
       }
-      
-      const data = await response.json()
-      
+      const data = raw as {
+        prediction: number
+        confidence: string
+        surgeLevel: string
+      }
       setResult({
         prediction: data.prediction,
         confidence: data.confidence,
@@ -87,7 +125,14 @@ function App() {
       })
     } catch (error) {
       console.error('Prediction failed:', error)
-      alert('Failed to get prediction. Is the API running on port 8000?')
+      const base =
+        error instanceof Error
+          ? error.message
+          : 'Could not reach the prediction service.'
+      const hint = import.meta.env.DEV
+        ? '\n\nLocal dev: run uvicorn on :8000 and `npm run dev` (Vite proxies /predict).'
+        : ''
+      alert(base + hint)
     } finally {
       setLoading(false)
     }
@@ -137,8 +182,11 @@ function App() {
     <div className="app">
       <header className="header">
         <div className="header-content">
-          <h1>🚕 NYC Taxi Surge Predictor</h1>
-          <p>Real-time demand forecasting powered by XGBoost</p>
+          <h1>NYC Taxi Surge Predictor</h1>
+          <p>
+            Interactive Demand Excess Ratio (DER) forecast from TLC-style market and weather
+            features — powered by XGBoost
+          </p>
         </div>
       </header>
 
@@ -366,22 +414,47 @@ function App() {
 
           {/* Info Section */}
           <div className="info-card">
-            <h3>ℹ️ About This Model</h3>
+            <h3>About this model</h3>
             <div className="info-grid">
               <div className="info-item">
-                <strong>Algorithm:</strong> XGBoost Regressor
+                <strong>Algorithm</strong>
+                {modelInfo.loading
+                  ? 'Loading…'
+                  : modelInfo.data?.algorithm ?? 'XGBoost Regressor'}
               </div>
               <div className="info-item">
-                <strong>Training Data:</strong> 1M+ NYC taxi trips (Jan-Mar 2025)
+                <strong>Training context</strong>
+                Large-scale NYC TLC trip samples with Dask-based preprocessing (see repo README).
               </div>
               <div className="info-item">
-                <strong>MAE:</strong> 0.47 (Mean Absolute Error)
+                <strong>Test MAE</strong>
+                {modelInfo.loading
+                  ? 'Loading…'
+                  : modelInfo.data?.metrics?.mae != null
+                    ? `${modelInfo.data.metrics.mae.toFixed(4)} (holdout)`
+                    : 'See model metadata after training'}
               </div>
               <div className="info-item">
-                <strong>Features:</strong> 9 (Market + Weather + Time)
+                <strong>Feature count</strong>
+                {modelInfo.loading
+                  ? 'Loading…'
+                  : modelInfo.data?.features?.length != null
+                    ? `${modelInfo.data.features.length} (manifest from training)`
+                    : 'Aligned with saved model_info.pkl'}
               </div>
             </div>
           </div>
+
+          <footer className="demo-footer">
+            <p>
+              <strong>Demo notice:</strong> Outputs are for illustration and research. They are not
+              financial or operational advice. Do not use this UI as the sole basis for pricing or
+              dispatch decisions.
+            </p>
+            <p className="demo-footer-meta">
+              API docs available at <code>/docs</code> when the backend is running.
+            </p>
+          </footer>
         </div>
       </main>
     </div>

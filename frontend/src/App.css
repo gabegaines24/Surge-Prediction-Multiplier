@@ -354,6 +354,36 @@ body {
   opacity: 0.9;
 }
 
+.demo-footer {
+  margin-top: 2rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow);
+  color: var(--text-light);
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.demo-footer strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.demo-footer code {
+  font-size: 0.85em;
+  background: var(--bg);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  color: var(--text);
+}
+
+.demo-footer-meta {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+
 @media (max-width: 768px) {
   .header h1 {
     font-size: 1.875rem;

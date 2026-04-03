@@ -13,6 +13,20 @@ For deployment on **Hugging Face Spaces**, use the included `Dockerfile` and you
 
 **Transparency:** See [`MODEL_CARD.md`](MODEL_CARD.md) for limitations, biases, and how API uncertainty fields are defined. After retraining, `GET /model-info` includes `data` (split dates, weather window) and `calibration` (holdout residual stats).
 
+**UI & accessibility:** The React app loads bounds from **`GET /config/ui`** (TLC zone ID 1–263, DER limits from `backend/config.yaml`) and uses sliders to avoid 400 validation errors. **Theme:** Light / Dark / System (persisted) plus **reduced-motion** support in CSS.
+
+## TLC Parquet refresh (automated)
+
+Large Parquet files stay **out of git** (`*.parquet` is ignored). To download Yellow or FHVHV monthly files with **SHA256** tracking:
+
+```bash
+python scripts/refresh_tlc_data.py --yellow --year 2025 --months 1 2 3
+# or: --months 1-6
+# FHVHV: add --fhvhv (can run both flags in one command)
+```
+
+Checksums and metadata are written to **`taxi data/.tlc_manifest.json`** (gitignored). Re-runs skip files whose hash matches. Then run `python -m backend.retrieval` and training as usual.
+
 ## Project Overview
 
 This project builds a predictive engine designed to forecast ride-sharing Surge Multipliers (via Demand Excess Ratios) for specific geographic zones in New York City. By analyzing 70M+ rows of taxi trip data, the model predicts supply-demand imbalances 15 minutes into the future.

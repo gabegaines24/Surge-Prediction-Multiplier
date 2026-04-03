@@ -24,9 +24,13 @@ tuning:
     learning_rate: [0.05, 0.1]
 
 data:
-  train_test_split_date: "2025-02-15"
+  # Time-ordered split for processed parquet (see backend/retrieval.py):
+  #   train: Time_Bin < train_test_split_date
+  #   test:  Time_Bin >= train_test_split_date
+  # Refresh TLC parquet under paths.taxi_data_dir, then bump dates to match coverage.
+  train_test_split_date: "2025-03-01"
   weather_start: "2025-01-01"
-  weather_end: "2025-03-31"
+  weather_end: "2025-05-31"
   # Clip / drop extreme DER values (0 = disable clipping)
   der_outlier_upper: 15.0
   der_outlier_lower: 0.01

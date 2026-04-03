@@ -13,7 +13,11 @@ sys.path.insert(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
 )
 
-from backend.modeling import prepare_cyclical_features, train_surge_model
+from backend.modeling import (
+    compute_residual_calibration,
+    prepare_cyclical_features,
+    train_surge_model,
+)
 
 
 class TestPrepareCyclicalFeatures:
@@ -108,6 +112,16 @@ class TestPrepareCyclicalFeatures:
         assert 'hour' in result.columns
         assert 'hour_sin' in result.columns
         assert 'hour_cos' in result.columns
+
+
+class TestResidualCalibration:
+    def test_quantiles_present(self):
+        y_true = np.array([1.0, 2.0, 3.0, 4.0, 5.0])
+        y_pred = np.array([1.1, 1.9, 3.2, 3.8, 5.1])
+        cal = compute_residual_calibration(y_true, y_pred)
+        assert cal["method"] == "empirical_residuals_on_holdout"
+        q = cal["holdout_residual_quantiles"]
+        assert q["p10"] <= q["p50"] <= q["p90"]
 
 
 class TestTrainSurgeModel:

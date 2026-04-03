@@ -91,6 +91,32 @@ def _startup() -> None:
     load_model()
 
 
+# NYC TLC taxi zone location IDs (published lookup tables use 1–263).
+NYC_TLC_ZONE_MIN = 1
+NYC_TLC_ZONE_MAX = 263
+
+
+@app.get("/config/ui")
+def ui_config() -> dict[str, Any]:
+    """Bounds and steps aligned with PredictRequest — use to drive sliders and validation."""
+    d = _cfg.get("data", {})
+    der_lo = float(d.get("der_outlier_lower", 0.01))
+    der_hi = float(d.get("der_outlier_upper", 15.0))
+    return {
+        "zoneId": {"min": NYC_TLC_ZONE_MIN, "max": NYC_TLC_ZONE_MAX},
+        "hour": {"min": 0, "max": 23},
+        "dayOfWeek": {"min": 0, "max": 6},
+        "supplyElasticity": {"min": 0.0, "max": 10.0, "step": 0.05},
+        "lagDER15": {"min": der_lo, "max": der_hi, "step": 0.05},
+        "lagDER30": {"min": der_lo, "max": der_hi, "step": 0.05},
+        "demandVelocity": {"min": -200.0, "max": 200.0, "step": 1},
+        "lagDemandVelocity15": {"min": -200.0, "max": 200.0, "step": 1},
+        "temp": {"min": -30.0, "max": 45.0, "step": 0.5},
+        "precip": {"min": 0.0, "max": 50.0, "step": 0.1},
+        "derBoundsFromConfig": {"min": der_lo, "max": der_hi},
+    }
+
+
 class PredictRequest(BaseModel):
     """Request body (camelCase for frontend compatibility)."""
 
@@ -106,7 +132,12 @@ class PredictRequest(BaseModel):
     hour: int = Field(..., ge=0, le=23, alias="hour")
     day_of_week: int = Field(..., ge=0, le=6, alias="dayOfWeek")
 
-    zone_id: int = Field(161, alias="zoneId")
+    zone_id: int = Field(
+        161,
+        ge=NYC_TLC_ZONE_MIN,
+        le=NYC_TLC_ZONE_MAX,
+        alias="zoneId",
+    )
     month: Optional[int] = Field(None, ge=1, le=12, alias="month")
     is_holiday: Optional[bool] = Field(None, alias="isHoliday")
     der_rolling_mean_1h: Optional[float] = Field(None, alias="derRollingMean1h")
@@ -407,6 +438,7 @@ if __name__ == "__main__":
     print("  GET  /health  - Health check")
     print("  POST /predict - Make prediction")
     print("  GET  /model-info - Model + calibration metadata")
+    print("  GET  /config/ui - UI bounds (zones, DER limits)")
     print("  GET  /interpretability/global-importance - Gain importances")
     print("  POST /interpretability/shap - TreeSHAP for one request")
     print(f"\nStarting server on http://{host}:{port}")

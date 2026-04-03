@@ -16,13 +16,14 @@ import numpy as np
 import pandas as pd
 import xgboost as xgb
 from cachetools import TTLCache
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from starlette.staticfiles import StaticFiles
 
 from .config_loader import load_config
 from .feature_engineering import add_calendar_from_hour_dow
+from .interpretability import global_gain_importance, shap_explanation_row
 from .zone_metadata import add_zone_hint_features
 
 _cfg = load_config()
@@ -33,6 +34,7 @@ INFO_PATH = os.path.join(MODEL_DIR, "model_info.pkl")
 model = None
 feature_names: list[str] = []
 model_mtime: float = 0.0
+_cached_info: dict[str, Any] | None = None
 
 # Response-level cache (short TTL); bounded by config
 _predict_cache: TTLCache = TTLCache(
@@ -43,7 +45,8 @@ _predict_cache: TTLCache = TTLCache(
 
 def load_model() -> None:
     """Load model + feature manifest from disk."""
-    global model, feature_names, model_mtime
+    global model, feature_names, model_mtime, _cached_info
+    _cached_info = None
     if not os.path.exists(MODEL_PATH):
         print(f"⚠️  Model not found at {MODEL_PATH}")
         print("   Run `python -m backend.train_model` first.")
@@ -54,8 +57,8 @@ def load_model() -> None:
     model = joblib.load(MODEL_PATH)
     model_mtime = os.path.getmtime(MODEL_PATH)
     if os.path.isfile(INFO_PATH):
-        info = joblib.load(INFO_PATH)
-        feature_names = list(info.get("features", []))
+        _cached_info = joblib.load(INFO_PATH)
+        feature_names = list(_cached_info.get("features", []))
     else:
         print("⚠️  model_info.pkl missing — falling back to model.feature_names_in_")
         feature_names = list(getattr(model, "feature_names_in_", []))
@@ -67,8 +70,9 @@ app = FastAPI(
     version="2.0.0",
     description=(
         "Predicts Demand Excess Ratio (DER) for NYC TLC zones using a trained XGBoost model. "
-        "Use **GET /health** and **GET /model-info** for readiness and artifact metadata; "
-        "**POST /predict** accepts camelCase JSON aligned with the web UI."
+        "Use **GET /health**, **GET /model-info**, **GET /interpretability/global-importance**, "
+        "and **POST /interpretability/shap** for transparency; **POST /predict** accepts "
+        "camelCase JSON aligned with the web UI. See `MODEL_CARD.md` in the repo."
     ),
     docs_url="/docs",
     redoc_url="/redoc",
@@ -278,10 +282,30 @@ def predict(body: PredictRequest) -> dict[str, Any]:
     prediction = float(model.predict(X)[0])
     confidence = _tree_contribution_confidence(model, X)
     surge = get_surge_level(prediction)
+    uq: dict[str, Any] = {
+        "treeEnsembleDispersion": f"{confidence:.0%}",
+        "note": "Dispersion from per-tree prediction spread; not a calibrated probability.",
+    }
+    if _cached_info and isinstance(_cached_info.get("calibration"), dict):
+        cal = _cached_info["calibration"]
+        hq = cal.get("holdout_residual_quantiles", {})
+        p10 = hq.get("p10")
+        p90 = hq.get("p90")
+        if p10 is not None and p90 is not None:
+            uq["holdoutErrorBand"] = {
+                "lower": float(prediction + float(p10)),
+                "upper": float(prediction + float(p90)),
+                "nominalLevel": 0.8,
+                "basis": "Empirical p10–p90 of test-set residuals vs point prediction.",
+                "caveat": (
+                    "Heuristic band from historical residuals; not a calibrated prediction interval."
+                ),
+            }
     out = {
         "prediction": prediction,
         "surgeLevel": surge,
         "confidence": f"{confidence:.0%}",
+        "uncertainty": uq,
         "recommendation": get_recommendation(prediction, body.precip),
         "defaultsUsed": defaults_used,
         "timestamp": datetime.now().isoformat(),
@@ -304,9 +328,11 @@ def _json_safe_metrics(m: dict[str, Any]) -> dict[str, Any]:
 def model_info() -> dict[str, Any]:
     if model is None:
         raise HTTPException(status_code=500, detail="Model not loaded")
-    info_extra: dict[str, Any] = {}
-    if os.path.isfile(INFO_PATH):
+    info_extra: dict[str, Any] = dict(_cached_info) if _cached_info else {}
+    if not info_extra and os.path.isfile(INFO_PATH):
         info_extra = joblib.load(INFO_PATH)
+    cal = info_extra.get("calibration")
+    data_prov = info_extra.get("data")
     return {
         "algorithm": "XGBoost",
         "n_estimators": int(model.n_estimators),
@@ -314,8 +340,44 @@ def model_info() -> dict[str, Any]:
         "learning_rate": float(model.learning_rate),
         "features": feature_names or list(getattr(model, "feature_names_in_", [])),
         "metrics": _json_safe_metrics(dict(info_extra.get("metrics", {}))),
+        "calibration": cal if isinstance(cal, dict) else None,
+        "data": data_prov if isinstance(data_prov, dict) else None,
         "artifact": info_extra.get("artifact_version", MODEL_PATH),
+        "modelCard": "MODEL_CARD.md",
     }
+
+
+@app.get("/interpretability/global-importance")
+def global_importance() -> dict[str, Any]:
+    """XGBoost gain-based global feature importance (normalized)."""
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
+    ranked = global_gain_importance(model)
+    return {
+        "importanceType": "gain",
+        "features": ranked,
+        "note": "Sum of gain fractions is 1.0 per tree ensemble; not causal attribution.",
+    }
+
+
+@app.post("/interpretability/shap")
+def interpret_shap(
+    body: PredictRequest,
+    max_features: int = Query(12, ge=4, le=64),
+) -> dict[str, Any]:
+    """Local TreeSHAP explanation for the same input as /predict."""
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
+    X, _defaults = _build_matrix(body)
+    try:
+        return shap_explanation_row(
+            model,
+            X,
+            model_mtime=model_mtime,
+            max_features=max_features,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=501, detail=str(e)) from e
 
 
 # React production build (Docker / Hugging Face). Mounted last so API routes win.
@@ -342,9 +404,11 @@ if __name__ == "__main__":
     print("=" * 60)
     load_model()
     print("\nEndpoints:")
-    print("  GET  /health      - Health check")
-    print("  POST /predict     - Make prediction")
-    print("  GET  /model-info  - Model information")
+    print("  GET  /health  - Health check")
+    print("  POST /predict - Make prediction")
+    print("  GET  /model-info - Model + calibration metadata")
+    print("  GET  /interpretability/global-importance - Gain importances")
+    print("  POST /interpretability/shap - TreeSHAP for one request")
     print(f"\nStarting server on http://{host}:{port}")
     print("=" * 60)
     uvicorn.run(app, host=host, port=port)

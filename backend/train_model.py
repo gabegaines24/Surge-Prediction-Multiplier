@@ -16,6 +16,7 @@ import pandas as pd
 
 from .config_loader import load_config
 from .modeling import (
+    compute_residual_calibration,
     prepare_cyclical_features,
     time_series_cv_scores,
     train_surge_model,
@@ -155,6 +156,9 @@ def train_and_save() -> object:
     metrics = getattr(model, "_surge_metrics_", {})
     metrics = {**metrics, **cv_metrics}
 
+    preds_test = model.predict(X_test)
+    calibration = compute_residual_calibration(y_test, preds_test)
+
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     versioned_path = os.path.join(model_dir, f"xgboost_surge_model_{stamp}.pkl")
     latest_path = os.path.join(model_dir, "xgboost_surge_model.pkl")
@@ -176,6 +180,14 @@ def train_and_save() -> object:
         "train_samples": len(X_train),
         "test_samples": len(X_test),
         "metrics": metrics,
+        "calibration": calibration,
+        "data": {
+            "train_test_split_date": config["data"]["train_test_split_date"],
+            "train_rows_rule": "Time_Bin < train_test_split_date (after pipeline filters)",
+            "test_rows_rule": "Time_Bin >= train_test_split_date",
+            "weather_start": config["data"]["weather_start"],
+            "weather_end": config["data"]["weather_end"],
+        },
         "artifact_version": versioned_path,
         "trained_at_utc": stamp,
     }

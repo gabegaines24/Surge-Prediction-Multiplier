@@ -1,17 +1,15 @@
 import { useEffect, useState } from 'react'
 import './App.css'
+import { SliderField } from './SliderField'
+import type { PredictionInput } from './predictionTypes'
+import {
+  DEFAULT_UI_BOUNDS,
+  clampPredictionInput,
+  parseUiBounds,
+  type UiBounds,
+} from './uiConfig'
 
-interface PredictionInput {
-  supplyElasticity: number
-  lagDER15: number
-  lagDER30: number
-  demandVelocity: number
-  lagDemandVelocity15: number
-  temp: number
-  precip: number
-  hour: number
-  dayOfWeek: number  // 0=Monday, 6=Sunday
-}
+const POPULAR_TLC_ZONES = [161, 132, 138, 237, 234, 4, 43, 68, 186, 263]
 
 interface PredictionResult {
   prediction: number
@@ -41,8 +39,14 @@ function formatApiError(payload: unknown): string {
   return 'Unable to complete prediction.'
 }
 
+type ThemePref = 'light' | 'dark' | 'system'
+
+const THEME_KEY = 'surge-pred-theme'
+
 function App() {
+  const [bounds, setBounds] = useState<UiBounds>(DEFAULT_UI_BOUNDS)
   const [input, setInput] = useState<PredictionInput>({
+    zoneId: 161,
     supplyElasticity: 0.8,
     lagDER15: 1.2,
     lagDER30: 1.1,
@@ -51,15 +55,70 @@ function App() {
     temp: 15,
     precip: 0,
     hour: 12,
-    dayOfWeek: 4  // Friday (more surge!)
+    dayOfWeek: 4,
   })
-  
+
   const [result, setResult] = useState<PredictionResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [modelInfo, setModelInfo] = useState<{
     loading: boolean
     data: ModelInfoPayload | null
   }>({ loading: true, data: null })
+
+  const [themePref, setThemePref] = useState<ThemePref>(() => {
+    try {
+      const s = localStorage.getItem(THEME_KEY) as ThemePref | null
+      if (s === 'light' || s === 'dark' || s === 'system') return s
+    } catch {
+      /* ignore */
+    }
+    return 'system'
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/config/ui')
+        if (!res.ok) throw new Error('config/ui failed')
+        const raw = await res.json()
+        if (!cancelled) setBounds(parseUiBounds(raw))
+      } catch {
+        if (!cancelled) setBounds(DEFAULT_UI_BOUNDS)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    setInput((prev) => clampPredictionInput(prev, bounds))
+  }, [bounds])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(THEME_KEY, themePref)
+    } catch {
+      /* ignore */
+    }
+  }, [themePref])
+
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = () => {
+      let resolved: 'light' | 'dark' = 'light'
+      if (themePref === 'dark') resolved = 'dark'
+      else if (themePref === 'light') resolved = 'light'
+      else resolved = mq.matches ? 'dark' : 'light'
+      document.documentElement.dataset.theme = resolved
+    }
+    apply()
+    if (themePref === 'system') {
+      mq.addEventListener('change', apply)
+      return () => mq.removeEventListener('change', apply)
+    }
+  }, [themePref])
 
   useEffect(() => {
     let cancelled = false
@@ -78,37 +137,37 @@ function App() {
     }
   }, [])
 
-  const handleInputChange = (field: keyof PredictionInput, value: string) => {
-    setInput(prev => ({
-      ...prev,
-      [field]: parseFloat(value) || 0
-    }))
+  const setField = (partial: Partial<PredictionInput>) => {
+    setInput((prev) => clampPredictionInput({ ...prev, ...partial }, bounds))
   }
 
   const getSurgeLevelColor = (level: string): string => {
-    switch(level) {
-      case 'Low Demand': return '#4ade80'
-      case 'Normal': return '#60a5fa'
-      case 'Moderate Surge': return '#fbbf24'
-      case 'High Surge': return '#f97316'
-      case 'Extreme Surge': return '#ef4444'
-      default: return '#9ca3af'
+    switch (level) {
+      case 'Low Demand':
+        return 'var(--surge-low)'
+      case 'Normal':
+        return 'var(--surge-normal)'
+      case 'Moderate Surge':
+        return 'var(--surge-moderate)'
+      case 'High Surge':
+        return 'var(--surge-high)'
+      case 'Extreme Surge':
+        return 'var(--surge-extreme)'
+      default:
+        return 'var(--text-muted)'
     }
   }
 
   const handlePredict = async () => {
     setLoading(true)
-    
+    const payload = clampPredictionInput(input, bounds)
     try {
-      // Same-origin when API serves the built SPA (Docker); use Vite proxy locally if needed.
       const response = await fetch('/predict', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(input)
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       })
-      
+
       const raw = await response.json().catch(() => ({}))
       if (!response.ok) {
         throw new Error(formatApiError(raw) || `Error ${response.status}`)
@@ -121,14 +180,12 @@ function App() {
       setResult({
         prediction: data.prediction,
         confidence: data.confidence,
-        surgeLevel: data.surgeLevel
+        surgeLevel: data.surgeLevel,
       })
     } catch (error) {
       console.error('Prediction failed:', error)
       const base =
-        error instanceof Error
-          ? error.message
-          : 'Could not reach the prediction service.'
+        error instanceof Error ? error.message : 'Could not reach the prediction service.'
       const hint = import.meta.env.DEV
         ? '\n\nLocal dev: run uvicorn on :8000 and `npm run dev` (Vite proxies /predict).'
         : ''
@@ -139,8 +196,9 @@ function App() {
   }
 
   const handleLoadSample = (scenario: 'morning' | 'evening' | 'rainy') => {
-    const samples = {
+    const samples: Record<string, PredictionInput> = {
       morning: {
+        zoneId: 186,
         supplyElasticity: 0.6,
         lagDER15: 1.8,
         lagDER30: 1.6,
@@ -149,9 +207,10 @@ function App() {
         temp: 10,
         precip: 0,
         hour: 8,
-        dayOfWeek: 1  // Tuesday morning commute
+        dayOfWeek: 1,
       },
       evening: {
+        zoneId: 161,
         supplyElasticity: 0.4,
         lagDER15: 2.2,
         lagDER30: 2.0,
@@ -160,9 +219,10 @@ function App() {
         temp: 18,
         precip: 0,
         hour: 18,
-        dayOfWeek: 4  // Friday evening rush (highest surge!)
+        dayOfWeek: 4,
       },
       rainy: {
+        zoneId: 132,
         supplyElasticity: 0.3,
         lagDER15: 2.5,
         lagDER30: 2.3,
@@ -171,209 +231,218 @@ function App() {
         temp: 12,
         precip: 5.2,
         hour: 17,
-        dayOfWeek: 5  // Saturday night + rain = extreme surge
-      }
+        dayOfWeek: 5,
+      },
     }
-    setInput(samples[scenario])
+    setInput(clampPredictionInput(samples[scenario], bounds))
     setResult(null)
   }
+
+  const hb = bounds.hour
+  const hourBounds = { min: hb.min, max: hb.max, step: 1 }
 
   return (
     <div className="app">
       <header className="header">
-        <div className="header-content">
-          <h1>NYC Taxi Surge Predictor</h1>
-          <p>
-            Interactive Demand Excess Ratio (DER) forecast from TLC-style market and weather
-            features — powered by XGBoost
-          </p>
+        <div className="header-content header-row">
+          <div>
+            <h1>NYC Taxi Surge Predictor</h1>
+            <p>
+              Interactive Demand Excess Ratio (DER) forecast from TLC-style market and weather
+              features — powered by XGBoost
+            </p>
+          </div>
+          <div className="theme-toggle" role="group" aria-label="Theme">
+            <button
+              type="button"
+              className={themePref === 'light' ? 'theme-btn active' : 'theme-btn'}
+              onClick={() => setThemePref('light')}
+            >
+              Light
+            </button>
+            <button
+              type="button"
+              className={themePref === 'dark' ? 'theme-btn active' : 'theme-btn'}
+              onClick={() => setThemePref('dark')}
+            >
+              Dark
+            </button>
+            <button
+              type="button"
+              className={themePref === 'system' ? 'theme-btn active' : 'theme-btn'}
+              onClick={() => setThemePref('system')}
+            >
+              System
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="main">
         <div className="container">
           <div className="grid">
-            {/* Input Section */}
             <div className="card">
               <h2>Input Features</h2>
-              
+
               <div className="sample-buttons">
-                <button onClick={() => handleLoadSample('morning')} className="btn-sample">
-                  🌅 Morning Rush
+                <button type="button" onClick={() => handleLoadSample('morning')} className="btn-sample">
+                  Morning rush
                 </button>
-                <button onClick={() => handleLoadSample('evening')} className="btn-sample">
-                  🌆 Evening Rush
+                <button type="button" onClick={() => handleLoadSample('evening')} className="btn-sample">
+                  Evening rush
                 </button>
-                <button onClick={() => handleLoadSample('rainy')} className="btn-sample">
-                  🌧️ Rainy Day
+                <button type="button" onClick={() => handleLoadSample('rainy')} className="btn-sample">
+                  Rainy day
                 </button>
               </div>
 
               <div className="form-section">
-                <h3>Market Dynamics</h3>
+                <h3>Location &amp; market</h3>
                 <div className="input-group">
-                  <label>Supply Elasticity</label>
+                  <label htmlFor="zoneId">TLC zone ID</label>
                   <input
+                    id="zoneId"
                     type="number"
-                    step="0.1"
-                    value={input.supplyElasticity}
-                    onChange={(e) => handleInputChange('supplyElasticity', e.target.value)}
-                  />
-                  <span className="hint">Ratio of drivers to requests</span>
-                </div>
-
-                <div className="input-group">
-                  <label>DER (t-15 min)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={input.lagDER15}
-                    onChange={(e) => handleInputChange('lagDER15', e.target.value)}
-                  />
-                  <span className="hint">Demand Excess Ratio 15 min ago</span>
-                </div>
-
-                <div className="input-group">
-                  <label>DER (t-30 min)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={input.lagDER30}
-                    onChange={(e) => handleInputChange('lagDER30', e.target.value)}
-                  />
-                  <span className="hint">Demand Excess Ratio 30 min ago</span>
-                </div>
-
-                <div className="input-group">
-                  <label>Demand Velocity</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={input.demandVelocity}
-                    onChange={(e) => handleInputChange('demandVelocity', e.target.value)}
-                  />
-                  <span className="hint">Rate of demand change</span>
-                </div>
-
-                <div className="input-group">
-                  <label>Lag Demand Velocity</label>
-                  <input
-                    type="number"
-                    step="1"
-                    value={input.lagDemandVelocity15}
-                    onChange={(e) => handleInputChange('lagDemandVelocity15', e.target.value)}
-                  />
-                  <span className="hint">Velocity 15 min ago</span>
-                </div>
-              </div>
-
-              <div className="form-section">
-                <h3>Weather & Time</h3>
-                <div className="input-group">
-                  <label>Temperature (°C)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={input.temp}
-                    onChange={(e) => handleInputChange('temp', e.target.value)}
-                  />
-                </div>
-
-                <div className="input-group">
-                  <label>Precipitation (mm)</label>
-                  <input
-                    type="number"
-                    step="0.1"
-                    value={input.precip}
-                    onChange={(e) => handleInputChange('precip', e.target.value)}
-                  />
-                </div>
-
-                <div className="input-group">
-                  <label>Hour of Day</label>
-                  <input
-                    type="number"
-                    min="0"
-                    max="23"
-                    value={input.hour}
-                    onChange={(e) => handleInputChange('hour', e.target.value)}
-                  />
-                  <span className="hint">0-23 (military time)</span>
-                </div>
-
-                <div className="input-group">
-                  <label>Day of Week</label>
-                  <select
-                    value={input.dayOfWeek}
-                    onChange={(e) => handleInputChange('dayOfWeek', e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '0.75rem',
-                      border: '2px solid #e2e8f0',
-                      borderRadius: '8px',
-                      fontSize: '1rem',
-                      backgroundColor: 'white'
+                    min={bounds.zoneId.min}
+                    max={bounds.zoneId.max}
+                    step={1}
+                    list="popular-tlc-zones"
+                    value={input.zoneId}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value, 10)
+                      setField({ zoneId: Number.isFinite(v) ? v : bounds.zoneId.min })
                     }}
+                  />
+                  <datalist id="popular-tlc-zones">
+                    {POPULAR_TLC_ZONES.map((z) => (
+                      <option key={z} value={z} />
+                    ))}
+                  </datalist>
+                  <span className="hint">NYC TLC location IDs {bounds.zoneId.min}–{bounds.zoneId.max}</span>
+                </div>
+
+                <SliderField
+                  id="supplyElasticity"
+                  label="Supply elasticity"
+                  hint="Ratio of drivers to requests"
+                  bounds={bounds.supplyElasticity}
+                  value={input.supplyElasticity}
+                  onChange={(v) => setField({ supplyElasticity: v })}
+                />
+                <SliderField
+                  id="lagDER15"
+                  label="DER (t−15 min)"
+                  hint="Demand excess ratio 15 min ago"
+                  bounds={bounds.lagDER15}
+                  value={input.lagDER15}
+                  onChange={(v) => setField({ lagDER15: v })}
+                />
+                <SliderField
+                  id="lagDER30"
+                  label="DER (t−30 min)"
+                  hint="Demand excess ratio 30 min ago"
+                  bounds={bounds.lagDER30}
+                  value={input.lagDER30}
+                  onChange={(v) => setField({ lagDER30: v })}
+                />
+                <SliderField
+                  id="demandVelocity"
+                  label="Demand velocity"
+                  hint="Rate of demand change"
+                  bounds={bounds.demandVelocity}
+                  value={input.demandVelocity}
+                  onChange={(v) => setField({ demandVelocity: v })}
+                />
+                <SliderField
+                  id="lagDemandVelocity15"
+                  label="Lag demand velocity"
+                  hint="Velocity 15 min ago"
+                  bounds={bounds.lagDemandVelocity15}
+                  value={input.lagDemandVelocity15}
+                  onChange={(v) => setField({ lagDemandVelocity15: v })}
+                />
+              </div>
+
+              <div className="form-section">
+                <h3>Weather &amp; time</h3>
+                <SliderField
+                  id="temp"
+                  label="Temperature (°C)"
+                  bounds={bounds.temp}
+                  value={input.temp}
+                  onChange={(v) => setField({ temp: v })}
+                />
+                <SliderField
+                  id="precip"
+                  label="Precipitation (mm)"
+                  bounds={bounds.precip}
+                  value={input.precip}
+                  onChange={(v) => setField({ precip: v })}
+                />
+                <SliderField
+                  id="hour"
+                  label="Hour of day"
+                  hint="0–23"
+                  bounds={hourBounds}
+                  value={input.hour}
+                  onChange={(v) => setField({ hour: Math.round(v) })}
+                />
+                <div className="input-group">
+                  <label htmlFor="dayOfWeek">Day of week</label>
+                  <select
+                    id="dayOfWeek"
+                    value={input.dayOfWeek}
+                    onChange={(e) => setField({ dayOfWeek: parseInt(e.target.value, 10) })}
+                    className="select-input"
                   >
                     <option value="0">Monday</option>
                     <option value="1">Tuesday</option>
                     <option value="2">Wednesday</option>
                     <option value="3">Thursday</option>
-                    <option value="4">Friday 🔥</option>
-                    <option value="5">Saturday 🔥</option>
+                    <option value="4">Friday</option>
+                    <option value="5">Saturday</option>
                     <option value="6">Sunday</option>
                   </select>
-                  <span className="hint">Fridays/Saturdays surge more!</span>
+                  <span className="hint">Weekend and evening patterns differ</span>
                 </div>
               </div>
 
-              <button 
-                className="btn-primary"
-                onClick={handlePredict}
-                disabled={loading}
-              >
-                {loading ? 'Predicting...' : '🎯 Predict Surge'}
+              <button type="button" className="btn-primary" onClick={handlePredict} disabled={loading}>
+                {loading ? 'Predicting…' : 'Predict surge'}
               </button>
             </div>
 
-            {/* Results Section */}
             <div className="card">
               <h2>Prediction Results</h2>
-              
+
               {result ? (
                 <div className="results">
-                  <div 
+                  <div
                     className="result-main"
-                    style={{ 
+                    style={{
                       borderColor: getSurgeLevelColor(result.surgeLevel),
-                      backgroundColor: `${getSurgeLevelColor(result.surgeLevel)}15`
                     }}
                   >
-                    <div className="result-label">Predicted Surge Level</div>
-                    <div 
-                      className="result-value"
-                      style={{ color: getSurgeLevelColor(result.surgeLevel) }}
-                    >
+                    <div className="result-label">Predicted surge level</div>
+                    <div className="result-value" style={{ color: getSurgeLevelColor(result.surgeLevel) }}>
                       {result.surgeLevel}
                     </div>
-                    <div className="result-der">
-                      DER: {result.prediction.toFixed(2)}x
-                    </div>
+                    <div className="result-der">DER: {result.prediction.toFixed(2)}x</div>
                   </div>
 
                   <div className="result-metrics">
                     <div className="metric">
-                      <div className="metric-label">Model Confidence</div>
+                      <div className="metric-label">Model confidence</div>
                       <div className="metric-value">{result.confidence}</div>
                     </div>
                     <div className="metric">
-                      <div className="metric-label">Demand Excess Ratio</div>
+                      <div className="metric-label">Demand excess ratio</div>
                       <div className="metric-value">{result.prediction.toFixed(2)}x</div>
                     </div>
                   </div>
 
                   <div className="result-info">
-                    <h3>📊 What this means:</h3>
+                    <h3>What this means</h3>
                     {result.prediction < 0.8 && (
                       <p>Low demand period. More drivers than riders. Consider reducing active drivers.</p>
                     )}
@@ -387,32 +456,33 @@ function App() {
                       <p>High surge conditions. Significant demand pressure. Surge pricing recommended.</p>
                     )}
                     {result.prediction >= 2.0 && (
-                      <p>Extreme surge! Very high demand with limited supply. Maximum surge pricing advised.</p>
+                      <p>Extreme surge: very high demand with limited supply. Maximum surge pricing advised.</p>
                     )}
                   </div>
 
                   <div className="result-features">
-                    <h3>Key Factors</h3>
+                    <h3>Key factors</h3>
                     <div className="feature-chips">
-                      {input.precip > 1 && <span className="chip chip-weather">🌧️ Rain Impact</span>}
-                      {input.hour >= 7 && input.hour <= 9 && <span className="chip chip-time">🌅 Morning Rush</span>}
-                      {input.hour >= 17 && input.hour <= 19 && <span className="chip chip-time">🌆 Evening Rush</span>}
-                      {input.demandVelocity > 20 && <span className="chip chip-demand">📈 High Velocity</span>}
-                      {input.supplyElasticity < 0.5 && <span className="chip chip-supply">🚗 Low Supply</span>}
+                      {input.precip > 1 && <span className="chip chip-weather">Rain impact</span>}
+                      {input.hour >= 7 && input.hour <= 9 && <span className="chip chip-time">Morning rush</span>}
+                      {input.hour >= 17 && input.hour <= 19 && <span className="chip chip-time">Evening rush</span>}
+                      {input.demandVelocity > 20 && <span className="chip chip-demand">High velocity</span>}
+                      {input.supplyElasticity < 0.5 && <span className="chip chip-supply">Low supply</span>}
                     </div>
                   </div>
                 </div>
               ) : (
                 <div className="results-empty">
-                  <div className="empty-icon">📊</div>
-                  <p>Enter features and click "Predict Surge" to see results</p>
-                  <p className="empty-hint">Try loading a sample scenario to get started!</p>
+                  <div className="empty-icon" aria-hidden>
+                    ◎
+                  </div>
+                  <p>Enter features and click Predict surge</p>
+                  <p className="empty-hint">Try a sample scenario to get started</p>
                 </div>
               )}
             </div>
           </div>
 
-          {/* Info Section */}
           <div className="info-card">
             <h3>About this model</h3>
             <div className="info-grid">
@@ -447,12 +517,12 @@ function App() {
 
           <footer className="demo-footer">
             <p>
-              <strong>Demo notice:</strong> Outputs are for illustration and research. They are not
-              financial or operational advice. Do not use this UI as the sole basis for pricing or
-              dispatch decisions.
+              <strong>Demo notice:</strong> Outputs are for illustration and research. They are not financial or
+              operational advice. Do not use this UI as the sole basis for pricing or dispatch decisions.
             </p>
             <p className="demo-footer-meta">
-              API docs available at <code>/docs</code> when the backend is running.
+              API docs at <code>/docs</code>; UI bounds from <code>/config/ui</code> (TLC zones, DER limits from
+              config).
             </p>
           </footer>
         </div>

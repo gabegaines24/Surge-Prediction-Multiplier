@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import './App.css'
 import { SliderField } from './SliderField'
-import type { PredictionInput } from './predictionTypes'
+import type {
+  PredictionInput,
+  PredictionResult,
+  PredictionUncertainty,
+  ShapExplanation,
+} from './predictionTypes'
+import { displayFeatureName } from './predictionTypes'
 import {
   DEFAULT_UI_BOUNDS,
   clampPredictionInput,
@@ -11,17 +17,62 @@ import {
 
 const POPULAR_TLC_ZONES = [161, 132, 138, 237, 234, 4, 43, 68, 186, 263]
 
-interface PredictionResult {
-  prediction: number
-  confidence: string
-  surgeLevel: string
-}
-
 interface ModelInfoPayload {
   algorithm?: string
   n_estimators?: number
   features?: string[]
   metrics?: Record<string, number | null>
+}
+
+function parseUncertainty(raw: unknown): PredictionUncertainty | null {
+  if (!raw || typeof raw !== 'object') return null
+  const u = raw as Record<string, unknown>
+  const bandRaw = u.holdoutErrorBand
+  let holdoutErrorBand: PredictionUncertainty['holdoutErrorBand']
+  if (bandRaw && typeof bandRaw === 'object') {
+    const b = bandRaw as Record<string, unknown>
+    const lower = Number(b.lower)
+    const upper = Number(b.upper)
+    if (Number.isFinite(lower) && Number.isFinite(upper)) {
+      holdoutErrorBand = {
+        lower,
+        upper,
+        nominalLevel: typeof b.nominalLevel === 'number' ? b.nominalLevel : undefined,
+        basis: typeof b.basis === 'string' ? b.basis : undefined,
+        caveat: typeof b.caveat === 'string' ? b.caveat : undefined,
+      }
+    }
+  }
+  return {
+    treeEnsembleDispersion:
+      typeof u.treeEnsembleDispersion === 'string' ? u.treeEnsembleDispersion : undefined,
+    note: typeof u.note === 'string' ? u.note : undefined,
+    holdoutErrorBand,
+  }
+}
+
+function parseShap(raw: unknown): ShapExplanation | null {
+  if (!raw || typeof raw !== 'object') return null
+  const s = raw as Record<string, unknown>
+  const expectedValue = Number(s.expectedValue)
+  const top = s.topFeatures
+  if (!Number.isFinite(expectedValue) || !Array.isArray(top)) return null
+  const topFeatures = top
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null
+      const f = item as Record<string, unknown>
+      const feature = typeof f.feature === 'string' ? f.feature : null
+      const shapValue = Number(f.shapValue)
+      if (!feature || !Number.isFinite(shapValue)) return null
+      return { feature, shapValue }
+    })
+    .filter((x): x is { feature: string; shapValue: number } => x != null)
+  if (topFeatures.length === 0) return null
+  return {
+    expectedValue,
+    topFeatures,
+    method: typeof s.method === 'string' ? s.method : undefined,
+  }
 }
 
 function formatApiError(payload: unknown): string {
@@ -160,27 +211,46 @@ function App() {
 
   const handlePredict = async () => {
     setLoading(true)
+    setResult(null)
     const payload = clampPredictionInput(input, bounds)
+    const body = JSON.stringify(payload)
+    const headers = { 'Content-Type': 'application/json' }
     try {
-      const response = await fetch('/predict', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      })
+      const [predictRes, shapRes] = await Promise.all([
+        fetch('/predict', { method: 'POST', headers, body }),
+        fetch('/interpretability/shap?max_features=8', { method: 'POST', headers, body }),
+      ])
 
-      const raw = await response.json().catch(() => ({}))
-      if (!response.ok) {
-        throw new Error(formatApiError(raw) || `Error ${response.status}`)
+      const predictRaw = await predictRes.json().catch(() => ({}))
+      if (!predictRes.ok) {
+        throw new Error(formatApiError(predictRaw) || `Error ${predictRes.status}`)
       }
-      const data = raw as {
-        prediction: number
-        confidence: string
-        surgeLevel: string
+
+      const prediction = Number((predictRaw as { prediction?: unknown }).prediction)
+      const confidence = String((predictRaw as { confidence?: unknown }).confidence ?? '')
+      const surgeLevel = String((predictRaw as { surgeLevel?: unknown }).surgeLevel ?? '')
+      if (!Number.isFinite(prediction) || !surgeLevel) {
+        throw new Error('Unexpected prediction response.')
       }
+
+      let shap: ShapExplanation | null = null
+      let shapError: string | null = null
+      if (shapRes.ok) {
+        const shapRaw = await shapRes.json().catch(() => null)
+        shap = parseShap(shapRaw)
+        if (!shap) shapError = 'SHAP explanation could not be parsed.'
+      } else {
+        const shapRaw = await shapRes.json().catch(() => ({}))
+        shapError = formatApiError(shapRaw) || `SHAP unavailable (${shapRes.status})`
+      }
+
       setResult({
-        prediction: data.prediction,
-        confidence: data.confidence,
-        surgeLevel: data.surgeLevel,
+        prediction,
+        confidence,
+        surgeLevel,
+        uncertainty: parseUncertainty((predictRaw as { uncertainty?: unknown }).uncertainty),
+        shap,
+        shapError,
       })
     } catch (error) {
       console.error('Prediction failed:', error)
@@ -428,6 +498,20 @@ function App() {
                       {result.surgeLevel}
                     </div>
                     <div className="result-der">DER: {result.prediction.toFixed(2)}x</div>
+                    {result.uncertainty?.holdoutErrorBand && (
+                      <div className="result-band">
+                        Rough band:{' '}
+                        {result.uncertainty.holdoutErrorBand.lower.toFixed(2)}x –{' '}
+                        {result.uncertainty.holdoutErrorBand.upper.toFixed(2)}x
+                        {result.uncertainty.holdoutErrorBand.nominalLevel != null && (
+                          <span className="result-band-level">
+                            {' '}
+                            (~{Math.round(result.uncertainty.holdoutErrorBand.nominalLevel * 100)}%
+                            holdout residuals)
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="result-metrics">
@@ -440,6 +524,30 @@ function App() {
                       <div className="metric-value">{result.prediction.toFixed(2)}x</div>
                     </div>
                   </div>
+
+                  {(result.uncertainty?.holdoutErrorBand ||
+                    result.uncertainty?.treeEnsembleDispersion) && (
+                    <div className="result-uncertainty">
+                      <h3>Uncertainty</h3>
+                      {result.uncertainty.holdoutErrorBand && (
+                        <p>
+                          Empirical residual band around the point forecast:{' '}
+                          <strong>
+                            {result.uncertainty.holdoutErrorBand.lower.toFixed(2)}x –{' '}
+                            {result.uncertainty.holdoutErrorBand.upper.toFixed(2)}x
+                          </strong>
+                          . Heuristic from holdout residuals, not a calibrated prediction interval.
+                        </p>
+                      )}
+                      {result.uncertainty.treeEnsembleDispersion && (
+                        <p className="uncertainty-dispersion">
+                          Tree-ensemble dispersion proxy:{' '}
+                          <strong>{result.uncertainty.treeEnsembleDispersion}</strong>
+                          {result.uncertainty.note ? ` — ${result.uncertainty.note}` : ''}
+                        </p>
+                      )}
+                    </div>
+                  )}
 
                   <div className="result-info">
                     <h3>What this means</h3>
@@ -457,6 +565,52 @@ function App() {
                     )}
                     {result.prediction >= 2.0 && (
                       <p>Extreme surge: very high demand with limited supply. Maximum surge pricing advised.</p>
+                    )}
+                  </div>
+
+                  <div className="result-shap">
+                    <h3>Why this prediction?</h3>
+                    {result.shap ? (
+                      <>
+                        <p className="shap-intro">
+                          Top {result.shap.method ?? 'TreeSHAP'} drivers vs model baseline (
+                          {result.shap.expectedValue.toFixed(2)}x). Bars push DER up or down from that
+                          baseline.
+                        </p>
+                        <ul className="shap-list">
+                          {(() => {
+                            const maxAbs = Math.max(
+                              ...result.shap.topFeatures.map((f) => Math.abs(f.shapValue)),
+                              1e-9,
+                            )
+                            return result.shap.topFeatures.map((f) => {
+                              const pct = (Math.abs(f.shapValue) / maxAbs) * 100
+                              const up = f.shapValue >= 0
+                              return (
+                                <li key={f.feature} className="shap-row">
+                                  <div className="shap-row-label">
+                                    <span>{displayFeatureName(f.feature)}</span>
+                                    <span className={up ? 'shap-val-up' : 'shap-val-down'}>
+                                      {up ? '+' : ''}
+                                      {f.shapValue.toFixed(3)}
+                                    </span>
+                                  </div>
+                                  <div className="shap-bar-track" aria-hidden>
+                                    <div
+                                      className={up ? 'shap-bar shap-bar-up' : 'shap-bar shap-bar-down'}
+                                      style={{ width: `${pct}%` }}
+                                    />
+                                  </div>
+                                </li>
+                              )
+                            })
+                          })()}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="shap-fallback">
+                        {result.shapError ?? 'Local explanation unavailable for this run.'}
+                      </p>
                     )}
                   </div>
 
@@ -521,8 +675,9 @@ function App() {
               operational advice. Do not use this UI as the sole basis for pricing or dispatch decisions.
             </p>
             <p className="demo-footer-meta">
-              API docs at <code>/docs</code>; UI bounds from <code>/config/ui</code> (TLC zones, DER limits from
-              config).
+              API docs at <code>/docs</code>; UI bounds from <code>/config/ui</code>. Predictions include
+              residual uncertainty bands; local TreeSHAP explanations come from{' '}
+              <code>/interpretability/shap</code>.
             </p>
           </footer>
         </div>

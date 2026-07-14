@@ -91,6 +91,8 @@ The Dask pipeline assigns rows by **`Time_Bin`** relative to `data.train_test_sp
 
 Weather joins use **`weather_start`**–**`weather_end`** (same file). When you **refresh TLC Parquet** with newer months, update those fields so weather covers the trip window, bump **`train_test_split_date`** to keep a forward holdout, then rerun retrieval and training.
 
+**Current window (Yellow TLC):** trips/weather `2025-01-01`–`2026-05-31`, holdout from `2026-03-01` (see `backend/config.yaml`).
+
 ## Training & serving
 
 1. **Process data (Dask)**: `python -m backend.retrieval` (requires TLC Parquet under `paths.taxi_data_dir`)

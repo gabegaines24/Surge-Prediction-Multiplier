@@ -33,7 +33,7 @@ flowchart LR
 - Uses **Dask** for lazy, out-of-core processing.
 - Bins trips into **15-minute × TLC zone** cells.
 - Computes demand (pickups), supply proxy (dropoffs), lag features, weather joins, calendar/rush-hour flags, zone hints (airport, Manhattan core).
-- Time-ordered train/test split via `train_test_split_date` in [`backend/config.yaml`](../backend/config.yaml) (currently `2025-03-01`).
+- Time-ordered train/test split via `train_test_split_date` in [`backend/config.yaml`](../backend/config.yaml) (currently `2026-03-01`; weather window `2025-01-01`–`2026-05-31`).
 
 ### 2. Training (`backend/train_model.py` + `backend/modeling.py`)
 
@@ -133,7 +133,7 @@ y = Active_Requests(t+15) / Available_Drivers(t+15)
 
 1. **HF token in `deploy_to_hf.sh`** — a token is hardcoded in the repo. Rotate it on Hugging Face and switch to an env var (`HF_TOKEN`) before pushing that commit.
 2. **No CI** — tests exist but aren't running in a pipeline; local pytest may fail outside the project venv (import/deps mismatch).
-3. **Training data may be stale** — config covers Jan–May 2025; refresh + retrain is the highest-value ML work.
+3. **Training coverage** — Yellow TLC Jan 2025–May 2026 with holdout from `2026-03-01`; FHVHV still optional (large).
 4. **No shared type contract** — frontend TypeScript types are hand-maintained vs OpenAPI.
 
 ---

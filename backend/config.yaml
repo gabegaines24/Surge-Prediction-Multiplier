@@ -28,9 +28,9 @@ data:
   #   train: Time_Bin < train_test_split_date
   #   test:  Time_Bin >= train_test_split_date
   # Refresh TLC parquet under paths.taxi_data_dir, then bump dates to match coverage.
-  train_test_split_date: "2025-03-01"
+  train_test_split_date: "2026-03-01"
   weather_start: "2025-01-01"
-  weather_end: "2025-05-31"
+  weather_end: "2026-05-31"
   # Clip / drop extreme DER values (0 = disable clipping)
   der_outlier_upper: 15.0
   der_outlier_lower: 0.01
